@@ -25,6 +25,20 @@ if ! find_backend_root; then
     exit 1
 fi
 
+# ─── Verify GraalVM binary architectures (defense in depth) ─────────────────
+# Also runs for --deploy-only invocations that skipped the build phase, so
+# stale binaries from a prior mis-configured build don't slip through.
+
+if [ -f "$BACKEND_ROOT/scripts/verify-graalvm-architectures.sh" ]; then
+    print_message "Verifying GraalVM binary architectures..." "$YELLOW"
+    if ! (cd "$BACKEND_ROOT" && ./scripts/verify-graalvm-architectures.sh); then
+        print_message "Error: GraalVM arch mismatch — refusing to deploy" "$RED"
+        exit 1
+    fi
+    print_message "✓ GraalVM arch check passed" "$GREEN"
+    echo ""
+fi
+
 PACKAGED_TEMPLATE="$BACKEND_ROOT/build/deploy-staging/packaged-template.yaml"
 
 if [ ! -f "$PACKAGED_TEMPLATE" ]; then

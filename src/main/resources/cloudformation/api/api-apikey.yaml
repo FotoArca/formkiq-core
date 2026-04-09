@@ -95,12 +95,6 @@ Resources:
       Handler: com.formkiq.module.lambda.authorizer.apikey.ApiKeyAuthorizerRequestHandler
       Description: Lambda function that processes ApiKey Authorizer
       Runtime: provided.al2023
-      # FotoArca fork: this Lambda's GraalVM native binary is built on Apple Silicon
-      # (aarch64), so the Lambda runtime architecture must be arm64 to match.
-      # If you rebuild the binary on x86, change this to x86_64 (or remove — x86_64 is default).
-      # See CLAUDE.md > FormKIQ GraalVM Binary Architecture for the verification procedure.
-      Architectures:
-        - arm64
       Timeout:
         Fn::Sub: "${LambdaTimeout}"
       MemorySize:

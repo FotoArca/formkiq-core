@@ -8,6 +8,16 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "$SCRIPT_DIR/common.sh"
 
+# ─── Parse arguments ──────────────────────────────────────────────────────────
+YES_MODE=false
+FAST=false
+for arg in "$@"; do
+    case $arg in
+        --yes|-y) YES_MODE=true ;;
+        --fast)   FAST=true ;;
+    esac
+done
+
 print_message "=== FotoArca Backend Build Phase ===" "$BLUE"
 
 # Find backend root
@@ -43,7 +53,7 @@ if [ -n "$EXISTING_ZIP" ]; then
     print_message "  Modified: $(date -r "$EXISTING_ZIP" '+%Y-%m-%d %H:%M:%S')" "$YELLOW"
 
     # Non-interactive bypass via --yes flag or CI=true
-    if [ "${1:-}" == "--yes" ] || [ "${CI:-}" == "true" ]; then
+    if [ "$YES_MODE" = true ] || [ "${CI:-}" == "true" ]; then
         print_message "Rebuilding (non-interactive mode)..." "$YELLOW"
     else
         read -p "Do you want to rebuild? (y/n): " -n 1 -r
@@ -59,15 +69,52 @@ if [ -n "$EXISTING_ZIP" ]; then
     rm -f "$DIST_DIR"/formkiq-core-*.zip
 fi
 
+# ─── Pre-pull amd64 GraalVM image (cross-compile x86_64 on Apple Silicon) ────
+# The graalvm-native-plugin runs native-image inside Docker via docker-java,
+# which does not pass a --platform hint. On Apple Silicon, the default pull is
+# linux/arm64 → produces arm64 Lambda binaries → Exec format error on the
+# x86_64 AWS Lambda runtime. Pre-pulling the amd64 variant overwrites the
+# locally-tagged image so the subsequent native-image container runs amd64.
+
+GRAALVM_IMAGE="ghcr.io/graalvm/native-image-community:24"
+
+if command -v docker &> /dev/null && docker info &> /dev/null; then
+    print_message "\nPre-pulling amd64 GraalVM builder image..." "$YELLOW"
+    print_message "  Image: $GRAALVM_IMAGE (platform: linux/amd64)" "$YELLOW"
+
+    if docker pull --platform linux/amd64 "$GRAALVM_IMAGE"; then
+        print_message "✓ amd64 GraalVM image cached locally" "$GREEN"
+    else
+        print_message "Warning: Failed to pre-pull amd64 GraalVM image" "$YELLOW"
+        print_message "Build may produce arm64 binaries if the cached image is arm64" "$YELLOW"
+    fi
+    echo ""
+else
+    print_message "Warning: Docker not running — cannot pre-pull amd64 GraalVM image" "$YELLOW"
+    print_message "If the GraalVM Lambdas need rebuilding, the build will fail." "$YELLOW"
+    echo ""
+fi
+
 # ─── Build ────────────────────────────────────────────────────────────────────
 
-print_message "\nBuilding distribution (this takes 15–35 minutes)..." "$YELLOW"
-print_message "Command: ./gradlew build distZip --no-daemon --console=plain" "$YELLOW"
+if [ "$FAST" = true ]; then
+    print_message "\nBuilding distribution in FAST mode (skipping test/spotlessCheck/checkstyleMain)..." "$YELLOW"
+    print_message "Command: ./gradlew build distZip -x test -x spotlessCheck -x checkstyleMain --no-daemon --console=plain" "$YELLOW"
+else
+    print_message "\nBuilding distribution (this takes 15–35 minutes)..." "$YELLOW"
+    print_message "Command: ./gradlew build distZip --no-daemon --console=plain" "$YELLOW"
+fi
 echo ""
 
 BUILD_START=$(date +%s)
 
-(cd "$BACKEND_ROOT" && ./gradlew build distZip --no-daemon --console=plain)
+if [ "$FAST" = true ]; then
+    (cd "$BACKEND_ROOT" && ./gradlew build distZip \
+        -x test -x spotlessCheck -x checkstyleMain \
+        --no-daemon --console=plain)
+else
+    (cd "$BACKEND_ROOT" && ./gradlew build distZip --no-daemon --console=plain)
+fi
 
 BUILD_END=$(date +%s)
 BUILD_TIME=$((BUILD_END - BUILD_START))
@@ -88,6 +135,20 @@ fi
 
 BUILT_ZIP=$(ls -t "${NEW_ZIPS[@]}" | head -1)
 ZIP_SIZE=$(du -sh "$BUILT_ZIP" | cut -f1)
+
+# ─── Verify GraalVM binary architectures ────────────────────────────────────
+# Fail fast locally if any lambda-*-graalvm binary doesn't match its CFN
+# Architectures declaration — better than deploying an Exec format error.
+
+if [ -f "$BACKEND_ROOT/scripts/verify-graalvm-architectures.sh" ]; then
+    print_message "\nVerifying GraalVM binary architectures..." "$YELLOW"
+    if ! (cd "$BACKEND_ROOT" && ./scripts/verify-graalvm-architectures.sh); then
+        print_message "Error: GraalVM binaries do not match CFN Architectures declarations" "$RED"
+        print_message "Fix: rebuild with the correct platform, or update CFN templates" "$RED"
+        exit 1
+    fi
+    print_message "✓ All GraalVM binary architectures match CFN" "$GREEN"
+fi
 
 print_message "\n========================================" "$GREEN"
 print_message "✓ Build completed successfully!" "$GREEN"

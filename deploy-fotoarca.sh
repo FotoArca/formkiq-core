@@ -27,6 +27,7 @@ BUILD_ONLY=false
 PACKAGE_ONLY=false
 DEPLOY_ONLY=false
 YES_FLAG=""
+FAST_FLAG=""
 SHOW_HELP=false
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --package-only)  PACKAGE_ONLY=true;  shift ;;
         --deploy-only)   DEPLOY_ONLY=true;   shift ;;
         --yes|-y)        YES_FLAG="--yes";   shift ;;
+        --fast)          FAST_FLAG="--fast"; shift ;;
         --help|-h)       SHOW_HELP=true;     shift ;;
         *)
             print_message "Unknown option: $1" "$RED"
@@ -68,6 +70,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo ""
     echo "Other options:"
     echo "  --yes, -y        Skip interactive prompts (non-interactive mode)"
+    echo "  --fast           Skip tests, spotlessCheck, and checkstyleMain (fast iteration mode)"
     echo "  --help, -h       Show this help message"
     echo ""
     echo "Examples:"
@@ -76,6 +79,8 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  $0 --check-only             # Validate prerequisites only"
     echo "  $0 --build-only             # Build the distribution zip only"
     echo "  $0 --skip-build --yes       # Non-interactive package + deploy"
+    echo "  $0 --fast                   # Full deploy, skip tests for fast iteration"
+    echo "  $0 --fast --yes             # Non-interactive fast deploy"
     exit 0
 fi
 
@@ -121,7 +126,7 @@ echo ""
 # deploy phase actually runs, ensuring the counter tracks successful deploys.
 
 if [ "$SKIP_DEPLOY" = false ]; then
-    FOTOARCA_VERSION_FILE="$SCRIPT_DIR/../.fotoarca-backend-version"
+    FOTOARCA_VERSION_FILE="$SCRIPT_DIR/.fotoarca-backend-version"
 
     if [ ! -f "$FOTOARCA_VERSION_FILE" ]; then
         print_message "Error: .fotoarca-backend-version file not found at $FOTOARCA_VERSION_FILE" "$RED"
@@ -160,7 +165,7 @@ if [ "$SKIP_BUILD" = false ]; then
     print_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" "$BLUE"
     echo ""
 
-    bash "$SCRIPT_DIR/deploy-phases/build.sh" $YES_FLAG
+    bash "$SCRIPT_DIR/deploy-phases/build.sh" $YES_FLAG $FAST_FLAG
 
     echo ""
 else
@@ -197,9 +202,9 @@ if [ "$SKIP_DEPLOY" = false ]; then
     # ─── Post-deploy: increment counter, commit, and tag ────────────────────
     echo "$NEW_DEPLOY_NUMBER" > "$FOTOARCA_VERSION_FILE"
 
-    git -C "$SCRIPT_DIR/.." add ".fotoarca-backend-version"
-    git -C "$SCRIPT_DIR/.." commit -m "chore: bump FotoArca backend deploy counter to $DEPLOY_TAG"
-    git -C "$SCRIPT_DIR/.." tag -a "$DEPLOY_TAG" -m "FotoArca backend deploy $DEPLOY_TAG"
+    git -C "$SCRIPT_DIR" add ".fotoarca-backend-version"
+    git -C "$SCRIPT_DIR" commit -m "chore: bump FotoArca backend deploy counter to $DEPLOY_TAG"
+    git -C "$SCRIPT_DIR" tag -a "$DEPLOY_TAG" -m "FotoArca backend deploy $DEPLOY_TAG"
 
     print_message "✓ Deploy counter committed and tagged as $DEPLOY_TAG" "$GREEN"
     echo ""
