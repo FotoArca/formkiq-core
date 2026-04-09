@@ -132,6 +132,11 @@ Resources:
         servers:
           - url: http://localhost
             description: Local development server
+            #! FotoArca fork: enable IPv6 + IPv4 (dualstack) on this HTTP API so
+            #! the FotoArca Lambda can reach it over IPv6 from its VPC egress path.
+            #! See openapi-jwt.yaml for the full rationale.
+            x-amazon-apigateway-endpoint-configuration:
+              ipAddressType: dualstack
         paths:
 
           /version:

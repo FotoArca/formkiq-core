@@ -71,7 +71,8 @@ Resources:
     Type: AWS::ApiGatewayV2::Api
     Properties:
       FailOnWarnings: "true"
-      IpAddressType: dualstack
+      #! IpAddressType=dualstack is set inside the OpenAPI spec at openapi-key.yaml
+      #! via x-amazon-apigateway-endpoint-configuration (see openapi-jwt.yaml for rationale).
 
   #@overlay/match missing_ok=True
   ApiKeyAuthorizerLogGroup:

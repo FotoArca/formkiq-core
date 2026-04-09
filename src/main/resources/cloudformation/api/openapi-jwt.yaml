@@ -132,6 +132,15 @@ Resources:
         servers:
           - url: http://localhost
             description: Local development server
+            #! FotoArca fork: enable IPv6 + IPv4 (dualstack) on this HTTP API so
+            #! the FotoArca Lambda can reach it over IPv6 from its VPC egress path.
+            #! This extension is the ONLY supported way to set IpAddressType on an
+            #! ApiGatewayV2::Api that imports an OpenAPI spec via BodyS3Location —
+            #! setting it as a top-level CFN Property is rejected with
+            #! "Redundant fields [ipAddressType=...] provided when either Body or
+            #! BodyS3Location is not empty".
+            x-amazon-apigateway-endpoint-configuration:
+              ipAddressType: dualstack
         paths:
 
           /version:
