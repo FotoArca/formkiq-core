@@ -71,6 +71,7 @@ Resources:
     Type: AWS::ApiGatewayV2::Api
     Properties:
       FailOnWarnings: "true"
+      IpAddressType: dualstack
 
   #@overlay/match missing_ok=True
   ApiKeyAuthorizerLogGroup:
@@ -94,9 +95,9 @@ Resources:
       Handler: com.formkiq.module.lambda.authorizer.apikey.ApiKeyAuthorizerRequestHandler
       Description: Lambda function that processes ApiKey Authorizer
       Runtime: provided.al2023
-      Timeout: 
+      Timeout:
         Fn::Sub: "${LambdaTimeout}"
-      MemorySize: 
+      MemorySize:
         Fn::Sub: "${LambdaMemory}"
       CodeUri: ./formkiq-module-lambda-authorizer-apikey.zip
       Tracing: Active

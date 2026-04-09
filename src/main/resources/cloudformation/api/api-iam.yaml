@@ -26,6 +26,7 @@ Resources:
     Type: AWS::ApiGatewayV2::Api
     Properties:
       FailOnWarnings: "true"
+      IpAddressType: dualstack
 
 Outputs:
   DocumentsIamApi:
