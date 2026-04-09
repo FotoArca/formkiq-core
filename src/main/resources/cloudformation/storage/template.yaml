@@ -172,6 +172,7 @@ Resources:
         -  AllowedOrigins: ["*"]
            AllowedMethods: ["PUT", "POST", "GET"]
            AllowedHeaders: ["*"]
+           ExposedHeaders: ["ETag"]
       NotificationConfiguration:
         QueueConfigurations:
         - Event: 's3:ObjectCreated:*'
@@ -269,6 +270,7 @@ Resources:
         -  AllowedOrigins: ["*"]
            AllowedMethods: ["PUT", "POST", "GET"]
            AllowedHeaders: ["*"]
+           ExposedHeaders: ["ETag"]
       NotificationConfiguration:
         LambdaConfigurations:
         - Event: 's3:ObjectCreated:*'

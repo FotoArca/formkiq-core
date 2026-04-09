@@ -15,3 +15,6 @@ node_modules
 !console/src/test/resources/test.zip
 websocket-api/src/coverage
 .settings
+
+# Local deploy configuration — never commit
+.env
