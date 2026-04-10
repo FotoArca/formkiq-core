@@ -95,14 +95,67 @@ else
     echo ""
 fi
 
+# ─── Purge all GraalVM build caches ──────────────────────────────────────────
+# The GraalVM Gradle plugin (graalvm-native-plugin) has multiple caching bugs:
+#
+# 1. STAGING (build/graalvm/java/main/): The plugin's decompressJar() method
+#    NEVER overwrites existing files. Stale .class files from prior builds
+#    persist and get compiled into the native image instead of fresh ones.
+#
+# 2. DOCKER LAYER CACHE: Docker may reuse a cached COPY layer with stale
+#    staging content if file checksums haven't changed enough to bust the cache.
+#
+# 3. DISTRIBUTION ZIPS (build/distributions/): Subproject dist zips package
+#    the native binary; stale zips carry stale binaries into the root distZip.
+#
+# We purge all three layers to guarantee a clean native-image build.
+
+print_message "\nPurging GraalVM build caches..." "$YELLOW"
+
+# 1. Delete GraalVM staging + output directories
+GRAALVM_DIRS=$(find "$BACKEND_ROOT" -path "*/build/graalvm" -type d 2>/dev/null)
+if [ -n "$GRAALVM_DIRS" ]; then
+    while IFS= read -r d; do
+        print_message "  Removing staging: ${d#$BACKEND_ROOT/}" "$YELLOW"
+        rm -rf "$d"
+    done <<< "$GRAALVM_DIRS"
+fi
+
+# 2. Delete subproject distribution zips (contain stale native binaries)
+DIST_DIRS=$(find "$BACKEND_ROOT" -mindepth 2 -path "*/build/distributions" -type d 2>/dev/null)
+if [ -n "$DIST_DIRS" ]; then
+    while IFS= read -r d; do
+        print_message "  Removing dist:    ${d#$BACKEND_ROOT/}" "$YELLOW"
+        rm -rf "$d"
+    done <<< "$DIST_DIRS"
+fi
+
+# 3. Remove stale Docker images from prior GraalVM builds
+if command -v docker &> /dev/null && docker info &> /dev/null; then
+    for img in "generated-graalvm-native-plugin:latest" "amazonlinux-graalvm:latest"; do
+        if docker image inspect "$img" &>/dev/null; then
+            print_message "  Removing Docker image: $img" "$YELLOW"
+            docker rmi "$img" 2>/dev/null || true
+        fi
+    done
+fi
+
+# 4. Clear Gradle configuration cache (can hold stale dependency resolution)
+if [ -d "$BACKEND_ROOT/.gradle/configuration-cache" ]; then
+    print_message "  Clearing Gradle configuration cache" "$YELLOW"
+    rm -rf "$BACKEND_ROOT/.gradle/configuration-cache"
+fi
+
+print_message "✓ GraalVM caches purged" "$GREEN"
+
 # ─── Build ────────────────────────────────────────────────────────────────────
 
 if [ "$FAST" = true ]; then
     print_message "\nBuilding distribution in FAST mode (skipping test/spotlessCheck/checkstyleMain)..." "$YELLOW"
-    print_message "Command: ./gradlew build distZip -x test -x spotlessCheck -x checkstyleMain --no-daemon --console=plain" "$YELLOW"
+    print_message "Command: ./gradlew build distZip -x test -x spotlessCheck -x checkstyleMain --no-build-cache --no-daemon --console=plain" "$YELLOW"
 else
     print_message "\nBuilding distribution (this takes 15–35 minutes)..." "$YELLOW"
-    print_message "Command: ./gradlew build distZip --no-daemon --console=plain" "$YELLOW"
+    print_message "Command: ./gradlew build distZip --no-build-cache --no-daemon --console=plain" "$YELLOW"
 fi
 echo ""
 
@@ -111,9 +164,10 @@ BUILD_START=$(date +%s)
 if [ "$FAST" = true ]; then
     (cd "$BACKEND_ROOT" && ./gradlew build distZip \
         -x test -x spotlessCheck -x checkstyleMain \
-        --no-daemon --console=plain)
+        --no-build-cache --no-daemon --console=plain)
 else
-    (cd "$BACKEND_ROOT" && ./gradlew build distZip --no-daemon --console=plain)
+    (cd "$BACKEND_ROOT" && ./gradlew build distZip \
+        --no-build-cache --no-daemon --console=plain)
 fi
 
 BUILD_END=$(date +%s)
@@ -148,6 +202,46 @@ if [ -f "$BACKEND_ROOT/scripts/verify-graalvm-architectures.sh" ]; then
         exit 1
     fi
     print_message "✓ All GraalVM binary architectures match CFN" "$GREEN"
+fi
+
+# ─── Verify GraalVM binary contains all registered handlers ─────────────────
+# Catch stale-staging bugs before deploy: confirm the lambda-api-graalvm binary
+# contains handler path strings that we know must be present.
+
+API_BINARY="$BACKEND_ROOT/lambda-api-graalvm/build/graalvm/output/server"
+if [ -f "$API_BINARY" ]; then
+    print_message "\nVerifying lambda-api-graalvm binary handler coverage..." "$YELLOW"
+    HANDLER_CHECK_FAILED=false
+
+    # Sample of handler paths that must exist — add new ones as features are added
+    REQUIRED_PATHS=(
+        "/documents/upload"
+        "/documents/upload/multipart"
+        "/documents/compress"
+    )
+
+    # Extract strings once to a temp file (avoid repeated 150MB scans).
+    # Using a file also avoids the pipefail + grep -q SIGPIPE bug where
+    # strings receives SIGPIPE (exit 141) when grep -q closes the pipe early.
+    STRINGS_FILE=$(mktemp)
+    strings "$API_BINARY" > "$STRINGS_FILE"
+
+    for path in "${REQUIRED_PATHS[@]}"; do
+        if ! grep -qF "$path" "$STRINGS_FILE"; then
+            print_message "  MISSING handler path: $path" "$RED"
+            HANDLER_CHECK_FAILED=true
+        fi
+    done
+
+    rm -f "$STRINGS_FILE"
+
+    if [ "$HANDLER_CHECK_FAILED" = true ]; then
+        print_message "Error: GraalVM binary is missing registered handler paths." "$RED"
+        print_message "This indicates a stale native-image build. The staging directory" "$RED"
+        print_message "may still contain old .class files. Try: rm -rf */build/graalvm" "$RED"
+        exit 1
+    fi
+    print_message "✓ All required handler paths found in binary" "$GREEN"
 fi
 
 print_message "\n========================================" "$GREEN"
