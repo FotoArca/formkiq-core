@@ -11,10 +11,12 @@ source "$SCRIPT_DIR/common.sh"
 # ─── Parse arguments ──────────────────────────────────────────────────────────
 YES_MODE=false
 FAST=false
+FORCE=false
 for arg in "$@"; do
     case $arg in
-        --yes|-y) YES_MODE=true ;;
-        --fast)   FAST=true ;;
+        --yes|-y)   YES_MODE=true ;;
+        --fast)     FAST=true ;;
+        --force|-f) FORCE=true; YES_MODE=true ;;  # --force implies --yes
     esac
 done
 
@@ -69,28 +71,35 @@ if [ -n "$EXISTING_ZIP" ]; then
     rm -f "$DIST_DIR"/formkiq-core-*.zip
 fi
 
-# ─── Pre-pull amd64 GraalVM image (cross-compile x86_64 on Apple Silicon) ────
-# The graalvm-native-plugin runs native-image inside Docker via docker-java,
-# which does not pass a --platform hint. On Apple Silicon, the default pull is
-# linux/arm64 → produces arm64 Lambda binaries → Exec format error on the
-# x86_64 AWS Lambda runtime. Pre-pulling the amd64 variant overwrites the
-# locally-tagged image so the subsequent native-image container runs amd64.
+# ─── Pre-pull amd64 Docker images (cross-compile x86_64 on Apple Silicon) ────
+# Two build mechanisms produce GraalVM native binaries:
+#
+# 1. graalvm-native-plugin (lambda-api-graalvm, lambda-apikey-authorizer,
+#    lambda-typesense): uses docker-java, which does not pass --platform.
+#    Pre-pulling the amd64 variant overwrites the locally-tagged image so
+#    the subsequent native-image container runs amd64.
+#
+# 2. lambda-s3-graalvm: custom Dockerfile with amazonlinux:2 base image.
+#    The Dockerfile and build.gradle both specify --platform linux/amd64,
+#    but pre-pulling ensures the image is cached before build starts.
 
 GRAALVM_IMAGE="ghcr.io/graalvm/native-image-community:24"
+AMAZONLINUX_IMAGE="amazonlinux:2"
 
 if command -v docker &> /dev/null && docker info &> /dev/null; then
-    print_message "\nPre-pulling amd64 GraalVM builder image..." "$YELLOW"
-    print_message "  Image: $GRAALVM_IMAGE (platform: linux/amd64)" "$YELLOW"
+    print_message "\nPre-pulling amd64 builder images..." "$YELLOW"
 
-    if docker pull --platform linux/amd64 "$GRAALVM_IMAGE"; then
-        print_message "✓ amd64 GraalVM image cached locally" "$GREEN"
-    else
-        print_message "Warning: Failed to pre-pull amd64 GraalVM image" "$YELLOW"
-        print_message "Build may produce arm64 binaries if the cached image is arm64" "$YELLOW"
-    fi
+    for img in "$GRAALVM_IMAGE" "$AMAZONLINUX_IMAGE"; do
+        print_message "  Image: $img (platform: linux/amd64)" "$YELLOW"
+        if docker pull --platform linux/amd64 "$img"; then
+            print_message "  ✓ amd64 image cached: $img" "$GREEN"
+        else
+            print_message "  Warning: Failed to pre-pull amd64 $img" "$YELLOW"
+        fi
+    done
     echo ""
 else
-    print_message "Warning: Docker not running — cannot pre-pull amd64 GraalVM image" "$YELLOW"
+    print_message "Warning: Docker not running — cannot pre-pull amd64 builder images" "$YELLOW"
     print_message "If the GraalVM Lambdas need rebuilding, the build will fail." "$YELLOW"
     echo ""
 fi
@@ -109,6 +118,14 @@ fi
 #    the native binary; stale zips carry stale binaries into the root distZip.
 #
 # We purge all three layers to guarantee a clean native-image build.
+
+if [ "$FORCE" = true ]; then
+    print_message "\n╔══════════════════════════════════════════════════════════╗" "$RED"
+    print_message "║  FORCE MODE: wiping ALL build caches + --rerun-tasks     ║" "$RED"
+    print_message "║  This takes longer than a normal build. Use when output  ║" "$RED"
+    print_message "║  looks stale (wrong arch, missing handlers, etc).        ║" "$RED"
+    print_message "╚══════════════════════════════════════════════════════════╝" "$RED"
+fi
 
 print_message "\nPurging GraalVM build caches..." "$YELLOW"
 
@@ -146,16 +163,71 @@ if [ -d "$BACKEND_ROOT/.gradle/configuration-cache" ]; then
     rm -rf "$BACKEND_ROOT/.gradle/configuration-cache"
 fi
 
+# ─── FORCE MODE: aggressive cache wipe ────────────────────────────────────────
+# Triggered by --force. Removes intermediate artifacts the standard purge misses,
+# and nukes the entire build/ dir for each GraalVM subproject. This is the
+# hammer to swing when the standard purge above doesn't resolve a stale build.
+if [ "$FORCE" = true ]; then
+    print_message "\n  [FORCE] Additional cache wipes..." "$RED"
+
+    # 5. Delete intermediate GraalVM zip files (the missing piece from the
+    #    standard purge): lambda-s3-graalvm/build/graalvm.zip is produced by
+    #    the dockerCp task and consumed by unzipFile. If it persists across
+    #    builds, unzipFile may not re-extract even when the zip changed.
+    GRAALVM_ZIPS=$(find "$BACKEND_ROOT" -path "*/build/graalvm.zip" -type f 2>/dev/null)
+    if [ -n "$GRAALVM_ZIPS" ]; then
+        while IFS= read -r f; do
+            print_message "    Removing: ${f#$BACKEND_ROOT/}" "$RED"
+            rm -f "$f"
+        done <<< "$GRAALVM_ZIPS"
+    fi
+
+    # 6. Delete subproject custom dist dirs (lambda-s3-graalvm/build/dist/)
+    CUSTOM_DIST_DIRS=$(find "$BACKEND_ROOT" -mindepth 2 -path "*/build/dist" -type d 2>/dev/null)
+    if [ -n "$CUSTOM_DIST_DIRS" ]; then
+        while IFS= read -r d; do
+            print_message "    Removing: ${d#$BACKEND_ROOT/}" "$RED"
+            rm -rf "$d"
+        done <<< "$CUSTOM_DIST_DIRS"
+    fi
+
+    # 7. Delete subproject build/libs/ dirs (stale copied runtime classpath jars)
+    LIBS_DIRS=$(find "$BACKEND_ROOT" -mindepth 2 -path "*/build/libs" -type d 2>/dev/null)
+    if [ -n "$LIBS_DIRS" ]; then
+        while IFS= read -r d; do
+            print_message "    Removing: ${d#$BACKEND_ROOT/}" "$RED"
+            rm -rf "$d"
+        done <<< "$LIBS_DIRS"
+    fi
+
+    # 8. Nuclear: wipe entire build/ dir for each GraalVM subproject. Ensures
+    #    absolutely no stale output can be reused. Add new GraalVM-based
+    #    subprojects here if/when they get added to the fork.
+    for p in lambda-s3-graalvm lambda-api-graalvm lambda-apikey-authorizer lambda-typesense; do
+        if [ -d "$BACKEND_ROOT/$p/build" ]; then
+            print_message "    Nuking:  $p/build" "$RED"
+            rm -rf "$BACKEND_ROOT/$p/build"
+        fi
+    done
+fi
+
 print_message "✓ GraalVM caches purged" "$GREEN"
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 
+# --rerun-tasks ignores task up-to-date checks globally. Defense-in-depth for
+# the stale-task-cache class of bugs (e.g., Exec tasks with no inputs/outputs).
+GRADLE_EXTRA_FLAGS=""
+if [ "$FORCE" = true ]; then
+    GRADLE_EXTRA_FLAGS="--rerun-tasks"
+fi
+
 if [ "$FAST" = true ]; then
     print_message "\nBuilding distribution in FAST mode (skipping test/spotlessCheck/checkstyleMain)..." "$YELLOW"
-    print_message "Command: ./gradlew build distZip -x test -x spotlessCheck -x checkstyleMain --no-build-cache --no-daemon --console=plain" "$YELLOW"
+    print_message "Command: ./gradlew build distZip -x test -x spotlessCheck -x checkstyleMain --no-build-cache --no-daemon --console=plain $GRADLE_EXTRA_FLAGS" "$YELLOW"
 else
     print_message "\nBuilding distribution (this takes 15–35 minutes)..." "$YELLOW"
-    print_message "Command: ./gradlew build distZip --no-build-cache --no-daemon --console=plain" "$YELLOW"
+    print_message "Command: ./gradlew build distZip --no-build-cache --no-daemon --console=plain $GRADLE_EXTRA_FLAGS" "$YELLOW"
 fi
 echo ""
 
@@ -164,10 +236,10 @@ BUILD_START=$(date +%s)
 if [ "$FAST" = true ]; then
     (cd "$BACKEND_ROOT" && ./gradlew build distZip \
         -x test -x spotlessCheck -x checkstyleMain \
-        --no-build-cache --no-daemon --console=plain)
+        --no-build-cache --no-daemon --console=plain $GRADLE_EXTRA_FLAGS)
 else
     (cd "$BACKEND_ROOT" && ./gradlew build distZip \
-        --no-build-cache --no-daemon --console=plain)
+        --no-build-cache --no-daemon --console=plain $GRADLE_EXTRA_FLAGS)
 fi
 
 BUILD_END=$(date +%s)

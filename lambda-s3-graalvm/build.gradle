@@ -53,10 +53,10 @@ jar.dependsOn(copyRuntimeClasspath)
 def graalvmZip = layout.buildDirectory.file('graalvm.zip')
 
 tasks.register('dockerBuild', Exec) {
-  description = 'Builds amazonlinux-graalvm:latest'
+  description = 'Builds amazonlinux-graalvm:latest (forced linux/amd64 for Lambda x86_64 runtime)'
   dependsOn(tasks.named('jar'))
   workingDir = layout.projectDirectory.asFile
-  commandLine 'docker', 'build', '-t', 'amazonlinux-graalvm:latest', '.'
+  commandLine 'docker', 'build', '--platform', 'linux/amd64', '-t', 'amazonlinux-graalvm:latest', '.'
 }
 
 tasks.register('dockerCreate', Exec) {
@@ -94,9 +94,14 @@ tasks.register('buildDockerAndCopyServer') {
 }
 
 tasks.register('unzipFile', Copy) {
-  from({
-    zipTree(layout.buildDirectory.file("graalvm.zip").get().asFile)
-  })
+  // Explicit inputs/outputs so Gradle re-extracts when graalvm.zip changes.
+  // Without these, the task gets marked up-to-date on every run after the
+  // first, leaving a stale server binary in build/graalvm/ even if graalvm.zip
+  // was rebuilt for a different architecture.
+  def graalvmZipFile = layout.buildDirectory.file("graalvm.zip")
+  inputs.file(graalvmZipFile)
+  outputs.dir(layout.buildDirectory.dir("graalvm"))
+  from({ zipTree(graalvmZipFile.get().asFile) })
   into(layout.buildDirectory.dir("graalvm"))
 }
 

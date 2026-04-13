@@ -22,6 +22,7 @@ declare -a ENTRIES=(
   "lambda-apikey-authorizer/build/graalvm/output/server|src/main/resources/cloudformation/api/api-apikey.yaml|ApiKeyAuthorizer"
   "lambda-api-graalvm/build/graalvm/output/server|src/main/resources/cloudformation/api/api-lambda.yaml|DocumentsApiRequests"
   "lambda-typesense/build/graalvm/output/server|src/main/resources/cloudformation/typesense/template.yaml|TypesenseProcessor"
+  "lambda-s3-graalvm/build/graalvm/server|src/main/resources/cloudformation/storage/template.yaml|DocumentsS3Update"
 )
 
 FAIL=0
