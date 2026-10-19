@@ -2,7 +2,7 @@
 
 # FotoArca FormKIQ Backend - Phase 3: SAM Package
 # Extracts the distribution zip, uploads Lambda artifacts to S3, and produces
-# a deployable CloudFormation template at build/deploy-staging/packaged-template.yaml
+# a deployable CloudFormation template at build/sam-workdir/packaged-template.yaml
 
 set -euo pipefail
 
@@ -30,47 +30,40 @@ print_message "Distribution zip: $(basename "$DIST_ZIP")" "$GREEN"
 print_message "  Size:     $(du -sh "$DIST_ZIP" | cut -f1)" "$GREEN"
 print_message "  Modified: $(date -r "$DIST_ZIP" '+%Y-%m-%d %H:%M:%S')" "$GREEN"
 
-# ─── Prepare staging directory ────────────────────────────────────────────────
+# ─── Prepare SAM workdir ──────────────────────────────────────────────────────
+# This is a local working directory for extracting the distribution zip and
+# running `sam package` against it. It has nothing to do with AWS environments —
+# the deploy target (prod/dev/etc) is set by $STACK_NAME from .env.
 
-STAGING_DIR="$BACKEND_ROOT/build/deploy-staging"
-print_message "\nPreparing staging directory: $STAGING_DIR" "$YELLOW"
+SAM_WORKDIR="$BACKEND_ROOT/build/sam-workdir"
+print_message "\nPreparing SAM workdir: $SAM_WORKDIR" "$YELLOW"
 
 # Clean and recreate on each run to avoid stale artifacts
-rm -rf "$STAGING_DIR"
-mkdir -p "$STAGING_DIR"
+rm -rf "$SAM_WORKDIR"
+mkdir -p "$SAM_WORKDIR"
 
 # ─── Extract zip ─────────────────────────────────────────────────────────────
+# The FotoArca fork's distZip uses `into '/'` in build.gradle:183, so the zip
+# is flat — all content lives at the zip root, not wrapped in a
+# formkiq-core-{version}/ directory. Treat SAM_WORKDIR itself as the
+# extraction target.
 
 print_message "Extracting distribution zip..." "$YELLOW"
-unzip -q "$DIST_ZIP" -d "$STAGING_DIR"
+unzip -q "$DIST_ZIP" -d "$SAM_WORKDIR"
 
-# Find the extracted directory (should be formkiq-core-{version}/)
-EXTRACTED_DIRS=()
-while IFS= read -r -d '' d; do
-    EXTRACTED_DIRS+=("$d")
-done < <(find "$STAGING_DIR" -maxdepth 1 -type d -name "formkiq-core-*" -print0 2>/dev/null)
-
-if [ ${#EXTRACTED_DIRS[@]} -eq 0 ]; then
-    print_message "Error: Expected a formkiq-core-* directory after extraction in $STAGING_DIR" "$RED"
+if [ ! -f "$SAM_WORKDIR/template.yaml" ]; then
+    print_message "Error: template.yaml not found at $SAM_WORKDIR/template.yaml" "$RED"
+    print_message "The distribution zip may be malformed or produced by an unexpected build." "$RED"
     exit 1
 fi
-
-EXTRACTED_DIR="${EXTRACTED_DIRS[0]}"
-print_message "✓ Extracted to: $(basename "$EXTRACTED_DIR")" "$GREEN"
-
-# Verify template.yaml exists inside the extracted directory
-if [ ! -f "$EXTRACTED_DIR/template.yaml" ]; then
-    print_message "Error: template.yaml not found in extracted distribution" "$RED"
-    print_message "Expected: $EXTRACTED_DIR/template.yaml" "$RED"
-    exit 1
-fi
+print_message "✓ Extracted distribution into $SAM_WORKDIR" "$GREEN"
 print_message "✓ Found template.yaml" "$GREEN"
 
 # ─── SAM Package ─────────────────────────────────────────────────────────────
 # SAM resolves Lambda CodeUri paths relative to the template, so we must run
-# sam package from inside the extracted directory.
+# sam package from inside the workdir where the extracted templates live.
 
-PACKAGED_TEMPLATE="$STAGING_DIR/packaged-template.yaml"
+PACKAGED_TEMPLATE="$SAM_WORKDIR/packaged-template.yaml"
 
 print_message "\nRunning SAM package..." "$YELLOW"
 print_message "  S3 bucket:  $SAM_ARTIFACT_BUCKET" "$YELLOW"
@@ -81,7 +74,7 @@ echo ""
 
 PACKAGE_START=$(date +%s)
 
-(cd "$EXTRACTED_DIR" && AWS_PROFILE=fotoarca sam package \
+(cd "$SAM_WORKDIR" && AWS_PROFILE=fotoarca sam package \
     --template-file template.yaml \
     --s3-bucket "$SAM_ARTIFACT_BUCKET" \
     --s3-prefix formkiq-core \
@@ -110,6 +103,6 @@ echo ""
 print_message "Package Statistics:" "$GREEN"
 print_message "  Package time:      ${PACKAGE_MINUTES}m ${PACKAGE_SECONDS}s" "$GREEN"
 print_message "  Template size:     $TEMPLATE_SIZE" "$GREEN"
-print_message "  Packaged template: build/deploy-staging/packaged-template.yaml" "$GREEN"
+print_message "  Packaged template: build/sam-workdir/packaged-template.yaml" "$GREEN"
 print_message "\nNext step:" "$YELLOW"
 echo "  ./scripts/deploy-fotoarca.sh --skip-build --skip-package  # Deploy only"

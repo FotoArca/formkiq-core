@@ -119,6 +119,37 @@ public class S3PresignerService {
   }
 
   /**
+   * Generate a S3 Signed Url for uploading a single part of a multipart upload.
+   *
+   * @param bucket {@link String}
+   * @param key {@link String}
+   * @param duration {@link Duration}
+   * @param uploadId {@link String} - the S3 multipart upload ID
+   * @param partNumber int - the part number (1-based)
+   * @param contentLength {@link Optional} {@link Long}
+   * @return {@link URL}
+   */
+  public URL presignUploadPartUrl(final String bucket, final String key, final Duration duration,
+      final String uploadId, final int partNumber, final Optional<Long> contentLength) {
+
+    try (S3Presigner signer = this.builder.build()) {
+
+      UploadPartRequest.Builder uploadBuilder = UploadPartRequest.builder().bucket(bucket).key(key)
+          .uploadId(uploadId).partNumber(partNumber);
+
+      if (contentLength.isPresent()) {
+        uploadBuilder = uploadBuilder.contentLength(contentLength.get());
+      }
+
+      UploadPartPresignRequest prereq = UploadPartPresignRequest.builder()
+          .signatureDuration(duration).uploadPartRequest(uploadBuilder.build()).build();
+
+      PresignedUploadPartRequest req = signer.presignUploadPart(prereq);
+      return req.url();
+    }
+  }
+
+  /**
    * Generate a S3 Signed Url for creating an object using PUT request.
    *
    * @param bucket {@link String}

@@ -28,21 +28,23 @@ PACKAGE_ONLY=false
 DEPLOY_ONLY=false
 YES_FLAG=""
 FAST_FLAG=""
+FORCE_FLAG=""
 SHOW_HELP=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --skip-check)    SKIP_CHECK=true;    shift ;;
-        --skip-build)    SKIP_BUILD=true;    shift ;;
-        --skip-package)  SKIP_PACKAGE=true;  shift ;;
-        --skip-deploy)   SKIP_DEPLOY=true;   shift ;;
-        --check-only)    CHECK_ONLY=true;    shift ;;
-        --build-only)    BUILD_ONLY=true;    shift ;;
-        --package-only)  PACKAGE_ONLY=true;  shift ;;
-        --deploy-only)   DEPLOY_ONLY=true;   shift ;;
-        --yes|-y)        YES_FLAG="--yes";   shift ;;
-        --fast)          FAST_FLAG="--fast"; shift ;;
-        --help|-h)       SHOW_HELP=true;     shift ;;
+        --skip-check)    SKIP_CHECK=true;     shift ;;
+        --skip-build)    SKIP_BUILD=true;     shift ;;
+        --skip-package)  SKIP_PACKAGE=true;   shift ;;
+        --skip-deploy)   SKIP_DEPLOY=true;    shift ;;
+        --check-only)    CHECK_ONLY=true;     shift ;;
+        --build-only)    BUILD_ONLY=true;     shift ;;
+        --package-only)  PACKAGE_ONLY=true;   shift ;;
+        --deploy-only)   DEPLOY_ONLY=true;    shift ;;
+        --yes|-y)        YES_FLAG="--yes";    shift ;;
+        --fast)          FAST_FLAG="--fast";  shift ;;
+        --force|-f)      FORCE_FLAG="--force"; shift ;;
+        --help|-h)       SHOW_HELP=true;      shift ;;
         *)
             print_message "Unknown option: $1" "$RED"
             SHOW_HELP=true
@@ -71,6 +73,9 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Other options:"
     echo "  --yes, -y        Skip interactive prompts (non-interactive mode)"
     echo "  --fast           Skip tests, spotlessCheck, and checkstyleMain (fast iteration mode)"
+    echo "  --force, -f      Full cache wipe + Gradle --rerun-tasks. Use when build output"
+    echo "                   looks stale (binary architecture mismatch, missing handler paths,"
+    echo "                   \"works on fresh clone but not here\"). Implies --yes."
     echo "  --help, -h       Show this help message"
     echo ""
     echo "Examples:"
@@ -81,6 +86,9 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  $0 --skip-build --yes       # Non-interactive package + deploy"
     echo "  $0 --fast                   # Full deploy, skip tests for fast iteration"
     echo "  $0 --fast --yes             # Non-interactive fast deploy"
+    echo "  $0 --force                  # Nuke all caches, rebuild + deploy (stale state recovery)"
+    echo "  $0 --force --build-only     # Nuke caches + rebuild only (no deploy)"
+    echo "  $0 --force --fast           # Nuke caches, skip tests, rebuild + deploy"
     exit 0
 fi
 
@@ -165,7 +173,7 @@ if [ "$SKIP_BUILD" = false ]; then
     print_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" "$BLUE"
     echo ""
 
-    bash "$SCRIPT_DIR/deploy-phases/build.sh" $YES_FLAG $FAST_FLAG
+    bash "$SCRIPT_DIR/deploy-phases/build.sh" $YES_FLAG $FAST_FLAG $FORCE_FLAG
 
     echo ""
 else

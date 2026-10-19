@@ -16,5 +16,5 @@ node_modules
 websocket-api/src/coverage
 .settings
 
-# Local deployment config (per-machine; contains ADMIN_EMAIL and bucket names)
+# Local deploy configuration — never commit
 .env

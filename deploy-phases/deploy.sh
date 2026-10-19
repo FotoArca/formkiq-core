@@ -39,7 +39,7 @@ if [ -f "$BACKEND_ROOT/scripts/verify-graalvm-architectures.sh" ]; then
     echo ""
 fi
 
-PACKAGED_TEMPLATE="$BACKEND_ROOT/build/deploy-staging/packaged-template.yaml"
+PACKAGED_TEMPLATE="$BACKEND_ROOT/build/sam-workdir/packaged-template.yaml"
 
 if [ ! -f "$PACKAGED_TEMPLATE" ]; then
     print_message "Error: Packaged template not found: $PACKAGED_TEMPLATE" "$RED"
@@ -47,7 +47,7 @@ if [ ! -f "$PACKAGED_TEMPLATE" ]; then
     echo "  ./scripts/deploy-fotoarca.sh --skip-build"
     exit 1
 fi
-print_message "Using packaged template: build/deploy-staging/packaged-template.yaml" "$GREEN"
+print_message "Using packaged template: build/sam-workdir/packaged-template.yaml" "$GREEN"
 
 # ─── Detect existing stack ───────────────────────────────────────────────────
 

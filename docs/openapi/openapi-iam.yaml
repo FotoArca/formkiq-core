@@ -1,6 +1,7 @@
         openapi: 3.0.1
         info:
-          title: FormKiQ API IAM
+          title:
+            Fn::Sub: ${AWS::StackName} IAM API - ${AppEnvironment}
           contact:
             name: FormKiQ
             url: https://formkiq.com
@@ -2527,6 +2528,154 @@
                     application/json:
                       schema:
                         $ref: '#/components/schemas/GetDocumentUrlResponse'
+              security:
+              - ApiAuthorization: []
+              x-amazon-apigateway-integration:
+                $ref: '#/components/x-amazon-apigateway-integrations/lambdaApi200'
+          /documents/upload/multipart:
+            post:
+              operationId: AddDocumentUploadMultipart
+              summary: Initiate a multipart upload for a large document
+              description: Initiates an S3 multipart upload and creates a new document record. Returns the uploadId and identifiers needed to upload parts. Use this path when a file exceeds the size suitable for a single PUT (typically 100MB+).
+              tags:
+              - Documents
+              parameters:
+              - $ref: '#/components/parameters/siteIdParam'
+              - $ref: '#/components/parameters/contentLengthParam'
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/AddDocumentUploadRequest'
+              responses:
+                "201":
+                  description: 201 CREATED
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: '#/components/headers/AccessControlAllowOrigin'
+                    Access-Control-Allow-Methods:
+                      $ref: '#/components/headers/AccessControlAllowMethods'
+                    Access-Control-Allow-Headers:
+                      $ref: '#/components/headers/AccessControlAllowHeaders'
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/MultipartUploadInitResponse'
+              security:
+              - ApiAuthorization: []
+              x-amazon-apigateway-integration:
+                $ref: '#/components/x-amazon-apigateway-integrations/lambdaApi201'
+          /documents/{documentId}/upload/multipart/{uploadId}/parts:
+            get:
+              operationId: GetDocumentUploadMultipartParts
+              summary: Get presigned URLs for uploading multipart upload parts
+              description: Returns presigned S3 URLs for a batch of part numbers of an in-progress multipart upload. Use these URLs with HTTP PUT to upload part content directly to S3. Maximum 10 part numbers per call.
+              tags:
+              - Documents
+              parameters:
+              - $ref: '#/components/parameters/siteIdParam'
+              - $ref: '#/components/parameters/documentIdParam'
+              - name: uploadId
+                in: path
+                description: S3 Multipart Upload Identifier
+                required: true
+                schema:
+                  type: string
+              - name: partNumbers
+                in: query
+                description: Comma-separated part numbers (1..10000). Maximum 10 per request. Example partNumbers=1,2,3
+                required: true
+                schema:
+                  type: string
+              responses:
+                "200":
+                  description: 200 OK
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: '#/components/headers/AccessControlAllowOrigin'
+                    Access-Control-Allow-Methods:
+                      $ref: '#/components/headers/AccessControlAllowMethods'
+                    Access-Control-Allow-Headers:
+                      $ref: '#/components/headers/AccessControlAllowHeaders'
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/MultipartPartUrlsResponse'
+              security:
+              - ApiAuthorization: []
+              x-amazon-apigateway-integration:
+                $ref: '#/components/x-amazon-apigateway-integrations/lambdaApi200'
+          /documents/{documentId}/upload/multipart/{uploadId}/complete:
+            post:
+              operationId: CompleteDocumentUploadMultipart
+              summary: Complete a multipart upload
+              description: Finalizes an in-progress S3 multipart upload by supplying the ordered list of parts (partNumber + eTag) that were previously uploaded. On success, S3 concatenates the parts into the final object.
+              tags:
+              - Documents
+              parameters:
+              - $ref: '#/components/parameters/siteIdParam'
+              - $ref: '#/components/parameters/documentIdParam'
+              - name: uploadId
+                in: path
+                description: S3 Multipart Upload Identifier
+                required: true
+                schema:
+                  type: string
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/MultipartCompleteRequest'
+              responses:
+                "200":
+                  description: 200 OK
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: '#/components/headers/AccessControlAllowOrigin'
+                    Access-Control-Allow-Methods:
+                      $ref: '#/components/headers/AccessControlAllowMethods'
+                    Access-Control-Allow-Headers:
+                      $ref: '#/components/headers/AccessControlAllowHeaders'
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/MultipartCompleteResponse'
+              security:
+              - ApiAuthorization: []
+              x-amazon-apigateway-integration:
+                $ref: '#/components/x-amazon-apigateway-integrations/lambdaApi200'
+          /documents/{documentId}/upload/multipart/{uploadId}:
+            delete:
+              operationId: AbortDocumentUploadMultipart
+              summary: Abort an in-progress multipart upload
+              description: Aborts an in-progress multipart upload and releases any staged parts in S3. Call this after a failed or cancelled upload to avoid accruing storage charges on orphaned parts.
+              tags:
+              - Documents
+              parameters:
+              - $ref: '#/components/parameters/siteIdParam'
+              - $ref: '#/components/parameters/documentIdParam'
+              - name: uploadId
+                in: path
+                description: S3 Multipart Upload Identifier
+                required: true
+                schema:
+                  type: string
+              responses:
+                "200":
+                  description: 200 OK
+                  headers:
+                    Access-Control-Allow-Origin:
+                      $ref: '#/components/headers/AccessControlAllowOrigin'
+                    Access-Control-Allow-Methods:
+                      $ref: '#/components/headers/AccessControlAllowMethods'
+                    Access-Control-Allow-Headers:
+                      $ref: '#/components/headers/AccessControlAllowHeaders'
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/MultipartCompleteResponse'
               security:
               - ApiAuthorization: []
               x-amazon-apigateway-integration:
@@ -8292,6 +8441,76 @@
                   type: object
                   additionalProperties:
                     type: object
+            MultipartUploadInitResponse:
+              type: object
+              required:
+              - documentId
+              - uploadId
+              - key
+              - bucket
+              properties:
+                documentId:
+                  type: string
+                  description: Document Identifier
+                uploadId:
+                  type: string
+                  description: S3 Multipart Upload Identifier
+                key:
+                  type: string
+                  description: S3 object key where the final document will be stored
+                bucket:
+                  type: string
+                  description: S3 bucket name
+            MultipartPartUrlsResponse:
+              type: object
+              properties:
+                parts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MultipartPartPresignedUrl'
+            MultipartPartPresignedUrl:
+              type: object
+              required:
+              - partNumber
+              - url
+              properties:
+                partNumber:
+                  type: integer
+                  description: Part number (1..10000)
+                url:
+                  type: string
+                  description: Presigned S3 URL for uploading this part via HTTP PUT
+            MultipartCompleteRequest:
+              type: object
+              required:
+              - parts
+              properties:
+                parts:
+                  type: array
+                  description: Ordered list of parts that were uploaded
+                  items:
+                    $ref: '#/components/schemas/MultipartCompletePart'
+            MultipartCompletePart:
+              type: object
+              required:
+              - partNumber
+              - eTag
+              properties:
+                partNumber:
+                  type: integer
+                  description: Part number (1..10000), must match the partNumber used when uploading
+                eTag:
+                  type: string
+                  description: ETag returned by S3 in the response headers of the PUT for this part
+            MultipartCompleteResponse:
+              type: object
+              properties:
+                documentId:
+                  type: string
+                  description: Document Identifier
+                status:
+                  type: string
+                  description: Result status (complete or aborted)
             GetDocumentResponse:
               required:
               - documentId
