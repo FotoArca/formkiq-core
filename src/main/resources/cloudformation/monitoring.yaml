@@ -24,8 +24,20 @@ Resources:
     Properties:
       AlarmName: 
         Fn::Sub: "FormKiQ-DLQ-${AppEnvironment}"
-      AlarmDescription: 
-        Fn::Sub: "There are failed messages in the FormKiQ ${AppEnvironment} dead letter queue."
+      # Readable alert (root CLAUDE.md "Alarm Emails Must Be Human-Readable", SEC-19); keep it under 1,024 characters.
+      AlarmDescription:
+        Fn::Sub: |-
+          WHAT HAPPENED
+          A FormKiQ ${AppEnvironment} document job (upload, update, document action or OCR) failed every retry and was parked in the dead-letter queue. Those documents may be missing or unprocessed. Parked messages are deleted after 4 days.
+
+          WHAT TO DO
+          1. Count them: aws --profile fotoarca sqs get-queue-attributes --region ${AWS::Region} --queue-url https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/{{resolve:ssm:/formkiq/${AppEnvironment}/sqs/DocumentsDeadLetterQueueName}} --attribute-names ApproximateNumberOfMessages
+          2. Find why: errors in the CloudWatch logs of the FormKiQ Lambdas named in SSM /formkiq/${AppEnvironment}/lambda/ (StagingCreateObject, DocumentsUpdateObject, DocumentActionsProcessor) around the alarm time.
+          3. After fixing the cause: SQS console, that queue, Start DLQ redrive (to the source queues). Purge only what can't be retried.
+          4. Tell Alex if documents are missing.
+
+          DETAILS
+          Fires when the queue has a visible message for 1 minute; clears when it is empty.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -55,6 +67,23 @@ Resources:
           Value:
             Fn::Sub: "${AppEnvironment}"
   
+  # Both FotoArca alarm recipients, as literal endpoints (root CLAUDE.md "Alarm Recipients"); each confirms once.
+  DlqAlarmEmailAdmin:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn:
+        Ref: DlqAlarmEmail
+      Protocol: email
+      Endpoint: admin@admin.photos
+
+  DlqAlarmEmailAlex:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn:
+        Ref: DlqAlarmEmail
+      Protocol: email
+      Endpoint: alex@plishkaconsulting.com
+
   DlqAlarmEmailParameter:
     Type: AWS::SSM::Parameter
     Properties:
