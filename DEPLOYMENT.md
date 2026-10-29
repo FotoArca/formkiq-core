@@ -1,6 +1,6 @@
 # FormKIQ Core — FotoArca Fork Deployment Guide
 
-This guide covers building, packaging, and deploying FormKIQ Core from the FotoArca fork (`formkiq-core-fotoarca`).
+This guide covers building, packaging, and deploying FormKIQ Core from the FotoArca fork: `~/workspace/FotoArca/formkiq-backend` (GitHub `FotoArca/formkiq-core`).
 
 ---
 
@@ -59,7 +59,7 @@ lambdas            templates              final template        packaged templat
 ### Full Build
 
 ```bash
-cd ~/workspace/FotoArca/formkiq-core-fotoarca
+cd ~/workspace/FotoArca/formkiq-backend
 
 # Clean build with all subprojects, tests, and distribution zip
 ./gradlew clean build
@@ -183,7 +183,7 @@ For deploying directly from your machine without going through CI/CD.
 ### Step 1: Build the Distribution
 
 ```bash
-cd ~/workspace/FotoArca/formkiq-core-fotoarca
+cd ~/workspace/FotoArca/formkiq-backend
 ./gradlew clean build distZip
 ```
 
