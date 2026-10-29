@@ -34,7 +34,10 @@ Resources:
     Type: AWS::ApiGatewayV2::Api
     Properties:
       FailOnWarnings: "true"
-      IpAddressType: dualstack
+      #! NOTE: IpAddressType cannot be set here because this API is defined via
+      #! Body/BodyS3Location (OpenAPI import); CFN rejects the combination as
+      #! "Redundant fields". IpAddressType=dualstack is set inside the OpenAPI
+      #! spec at openapi-jwt.yaml via x-amazon-apigateway-endpoint-configuration.
 
 Outputs:
   DocumentsHttpApi:

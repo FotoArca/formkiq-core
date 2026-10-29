@@ -1,5 +1,6 @@
 # Stage 1: Build the Java installation and create ZIP
-FROM amazonlinux:2 AS builder
+# --platform ensures x86_64 binary on Apple Silicon (ARM) hosts
+FROM --platform=linux/amd64 amazonlinux:2 AS builder
 
 # Set environment variables for SDKMAN!
 ENV SDKMAN_DIR=/root/.sdkman
@@ -24,7 +25,7 @@ RUN rm libfontmanager.so
 RUN zip graalvm.zip server lib*.so libpng15.so*
 
 ### Stage 2: Copy the ZIP file to a lightweight image
-FROM alpine:latest
+FROM --platform=linux/amd64 alpine:latest
 
 ## Copy the ZIP file from the builder stage
 COPY --from=builder /graalvm.zip /graalvm.zip
